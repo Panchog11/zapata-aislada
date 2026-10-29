@@ -1,0 +1,4 @@
+.claude/
+*.dxf
+*.zip
+node_modules/
