@@ -236,6 +236,7 @@ svg text{font-family:var(--f-mono);fill:var(--ink)}
   <button class="btn" id="b3d" type="button">Visualizar en 3D</button>
   <button class="btn" id="bPlan" type="button">Generar planos</button>
   <button class="btn" id="bDxf" type="button">Exportar DXF (→ DWG)</button>
+  <button class="btn" id="bRvt" type="button" title="Archivo de intercambio para el complemento pyRevit «Zapata Aislada»">Exportar a Revit</button>
   <button class="btn" id="bWord" type="button">Memoria Word</button>
   <button class="btn" id="bPdf" type="button">Memoria PDF</button>
   <span class="sep"></span>
@@ -344,6 +345,7 @@ svg text{font-family:var(--f-mono);fill:var(--ink)}
 <script src="js/zapata-calc.js"></script>
 <script src="js/zapata-design.js"></script>
 <script src="js/zapata-dxf.js"></script>
+<script src="js/zapata-revit.js"></script>
 <script src="js/zapata-3d.js"></script>
 <script src="js/zapata-report.js"></script>
 <script>
@@ -364,7 +366,7 @@ const GROUPS = [
     ['norma', 'Reglamento', 'sel', [['CIRSOC201-2005', 'CIRSOC 201-2005']]],
     ['recMinZ', 'Recub. mínimo zapata', '§7.7 según exposición', 'mm', 5], ['recMinCol', 'Recub. mínimo fuste', '§7.7 según exposición', 'mm', 5],
     ['sMaxH', 'Sep. máx. barras: ×H', '§7.6.5', '—', 0.5], ['sMaxDb', 'Sep. máx. barras: ×φ', '§7.6.5', '—', 1], ['sMaxAbs', 'Sep. máx. absoluta', '§7.6.5', 'mm', 10],
-    ['estSepDb', 'Sep. estribos: ×φ long.', '§7.10.5.2', '—', 1], ['estMinTxt', 'φ estribo mínimo', '§7.10.5.1 · φlong:φest', 'text'],
+    ['estSepDb', 'Sep. estribos: ×φ long.', '§7.10.5.2', '—', 1], ['estMinTxt', 'φ estribo mínimo', '§7.10.5.1 · φlong:φest', 'text'], ['dobMinTxt', 'Doblado: Ø interior mín.', '§7.2.1 · φmáx:×φ', 'text'],
     ['critSup', 'Armadura superior exigida si', 'sel', [['cap22', 'Mu− > φMn hormigón simple'], ['siempre', 'Mu− > 0']]],
     ['sism', 'Proyecto sismorresistente (INPRES-CIRSOC 103)', 'chk']]},
   { n: 2, t: 'Cargas y combinaciones', combos: true },
@@ -433,7 +435,7 @@ function renderCombos() {
 }
 function setInputs() {
   document.querySelectorAll('[data-k]').forEach(el => {
-    const k = el.dataset.k, v = k === 'estMinTxt' ? ST.estMin.map(p => p.join(':')).join(', ') : ST[k];
+    const k = el.dataset.k, v = k === 'estMinTxt' ? ST.estMin.map(p => p.join(':')).join(', ') : k === 'dobMinTxt' ? ST.dobMin.map(p => p.join(':')).join(', ') : ST[k];
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
   });
   document.querySelectorAll('#diamZ input').forEach(el => { el.checked = ST.diamZ.includes(+el.value); });
@@ -446,6 +448,7 @@ function syncEnable() {
 function readField(el) {
   const k = el.dataset.k;
   if (k === 'estMinTxt') { const p = el.value.split(/[,;]/).map(s => s.split(':').map(Number)).filter(a => a.length === 2 && a.every(isFinite)); if (p.length) ST.estMin = p.sort((a, b) => a[0] - b[0]); return; }
+  if (k === 'dobMinTxt') { const p = el.value.split(/[,;]/).map(s => s.split(':').map(Number)).filter(a => a.length === 2 && a.every(v => isFinite(v) && v > 0)); if (p.length) ST.dobMin = p.sort((a, b) => a[0] - b[0]); return; }
   if (el.type === 'checkbox') ST[k] = el.checked;
   else if (typeof ZC.defaults()[k] === 'number') ST[k] = parseFloat(el.value);
   else ST[k] = el.value;
@@ -739,6 +742,11 @@ function exportDXF() {
   const base = `${(ST.nombre || 'zapata').replace(/[^\w-]+/g, '_')}_planos`;
   saveFile(base + '.dxf', ZX.toBytes(ZX.toDXF(D)), 'application/dxf', base + '_dxf.zip');
 }
+function exportRevit() {
+  const X = ZRV.toRevit(ST, R); if (X.error) { toast(X.error); return; }
+  if (X.noVerifica.length) toast(`Atención: el diseño tiene ${X.noVerifica.length} verificación(es) que no verifican. Se exporta igual.`);
+  saveFile(`${(ST.nombre || 'zapata').replace(/[^\w-]+/g, '_')}_revit.json`, ZX.toBytes(unescape(encodeURIComponent(JSON.stringify(X)))), 'application/json');
+}
 
 /* ================= Dimensionamiento automático ================= */
 let running = false;
@@ -821,7 +829,7 @@ $('bRes').addEventListener('click', () => $('results').scrollIntoView({ behavior
 $('b3d').addEventListener('click', () => { showTab('3d'); $('viewCard').scrollIntoView({ behavior: 'smooth' }); });
 $('bPlan').addEventListener('click', () => { showTab('pla'); $('viewCard').scrollIntoView({ behavior: 'smooth' }); });
 $('bPlan2').addEventListener('click', genPlan);
-$('bDxf').addEventListener('click', exportDXF);
+$('bDxf').addEventListener('click', exportDXF); $('bRvt').addEventListener('click', exportRevit);
 ['bMemoDoc', 'bWord'].forEach(k => $(k).addEventListener('click', () => exportMemo('docx')));
 ['bMemoPdf', 'bPdf'].forEach(k => $(k).addEventListener('click', () => exportMemo('pdf'))); $('bDxf2').addEventListener('click', exportDXF);
 $('bSave').addEventListener('click', () => saveFile(`${(ST.nombre || 'zapata').replace(/[^\w-]+/g, '_')}.json`, ZX.toBytes(unescape(encodeURIComponent(JSON.stringify(ST, null, 1)))), 'application/json'));

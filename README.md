@@ -19,6 +19,7 @@ Se abre con cualquier navegador: `zapata_aislada.html` (necesita la carpeta `js/
 - **Dimensionamiento automático:** busca dimensiones y armaduras, compara alternativas y solo acepta soluciones sin ninguna verificación en «no verifica».
 - **Modelo 3D (Three.js):** muestra la geometría real de las barras.
 - **Planos DXF R12 (AutoCAD):** planta, cortes A-A y B-B, planilla de armaduras y rótulo, con capas separadas. Para obtener el DWG hay que abrirlo en AutoCAD y guardarlo como DWG.
+- **Exportar a Revit:** genera un JSON con la geometría de la zapata, el fuste y el eje de cada barra. El complemento pyRevit «Zapata Aislada» (en una carpeta aparte) lo modela en Revit 2027 con armadura nativa.
 - **Memoria de cálculo:** exporta a Word (.docx, editable) y a PDF. Para cada verificación incluye la fórmula, los valores reemplazados, el resultado, el criterio y la referencia normativa.
 
 ## Estructura
@@ -29,6 +30,7 @@ Se abre con cualquier navegador: `zapata_aislada.html` (necesita la carpeta `js/
 | `js/zapata-calc.js` | Cálculo y verificaciones (sin interfaz; también corre en Node) |
 | `js/zapata-design.js` | Dimensionamiento automático |
 | `js/zapata-dxf.js` | Planos: DXF, vista previa SVG y zip |
+| `js/zapata-revit.js` | Archivo de intercambio para el complemento de Revit |
 | `js/zapata-3d.js` | Visor 3D |
 | `js/zapata-report.js` | Memoria de cálculo: pantalla, Word y PDF |
 | `js/fuentes/` | DejaVu Sans para el PDF (licencia en `LICENSE-DejaVu.txt`) |

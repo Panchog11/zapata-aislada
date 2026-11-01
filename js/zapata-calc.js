@@ -35,6 +35,7 @@
       sMaxH: 2.5, sMaxDb: 25, sMaxAbs: 300,          // §7.6.5 (configurable)
       estMin: [[16, 6], [25, 8], [32, 10], [99, 12]],  // §7.10.5.1 (configurable): [φ long. máx, φ estribo mín]
       estSepDb: 12,                                   // §7.10.5.2 (configurable)
+      dobMin: [[25, 6], [32, 8], [99, 10]],            // §7.2.1 (configurable): [φ máx, diámetro interior de doblado / φ]
       critSup: 'cap22',                               // criterio para exigir armadura superior
       sism: false,
       // 2. Cargas y combinaciones
@@ -385,6 +386,8 @@
     return sup.length;
   }
   function tieMinDiam(I, dbL) { for (const [m, d] of I.estMin) if (dbL <= m) return d; return 12; }
+  // Radio de doblado medido al eje de la barra (m): diámetro interior mínimo de la tabla + φ, dividido 2
+  function bendR(I, db) { let k = 10; for (const [m, f] of I.dobMin) if (db <= m) { k = f; break; } return (k * db + db) / 2000; }
 
   function colShear(I, sec, Nu, Vu, dir, se, legs) {
     const fc = I.fc, fyt = Math.min(I.fyt, 420), sq = Math.sqrt(fc);
@@ -716,7 +719,14 @@
       const ps = pos(other - 2 * r - db / 1000, s / 100);
       const dem = R.dem && R.dem[ax], anc = top ? (dem && dem.top && dem.top.anc) : (dem && dem.anc);
       const hook = anc && anc.mode === 'gancho';
-      const hl = 12 * db / 1000, hz = top ? -1 : 1;
+      // Gancho normal a 90° (§7.1.2): extensión recta de 12φ después del doblado; la pata se mide desde el vértice de los ejes
+      const rb = bendR(I, db), hl = rb + 12 * db / 1000, hz = top ? -1 : 1;
+      if (hook) {
+        const disp = top ? (zc - zb - r - (I.dbx + I.dby) / 1000) : (zt - rs - zc), lim = disp * 1000, req = (hl + db / 2000) * 1000;
+        R.checks.push(mkCheck({ key: 'gh' + id, g: 'Zapata · detallado', n: `Altura del gancho ${name.toLowerCase()}`, kind: 'ge', d: lim, c: req, unit: 'mm', dec: 0,
+          ref: 'CIRSOC 201-2005 §7.1.2, §7.2.1 (tabla de doblado configurable)', formula: 'pata = r doblado + 12·φ (+ φ/2) ≤ altura libre hasta el recubrimiento opuesto',
+          subst: `r al eje = ${fmt(rb * 1000, 0)} mm; pata = ${fmt(hl * 1000, 0)} mm`, crit: 'altura libre ≥ pata', sug: 'Aumentar H o reducir el diámetro.' }));
+      }
       const bars = ps.map(p => {
         const a = -len / 2, b = len / 2, pts = [];
         const P = (u, z) => dir ? [u, p, z] : [p, u, z];
@@ -725,7 +735,7 @@
         if (hook) pts.push(P(b, zc + hz * hl));
         return pts;
       });
-      const lenDev = len + (hook ? 2 * hl : 0);
+      const lenDev = hook ? len + 2 * hl - (4 - Math.PI) * rb : len; // desarrollo por el eje (dos arcos de 90°)
       groups.push({ id, name, kind, ax, db, s, n: ps.length, bars, hook, len: lenDev, straight: len, hookLen: hook ? hl : 0, kg: ps.length * lenDev * kgm(db), layer: top ? 'ARM_SUP' : 'ARM_INF', top, pos: ps, z: zc });
     };
     footBars('P1', 'Inferior dir. x', 'inf', 'x', I.dbx, I.sx, zb + dd.zx, false);
@@ -738,22 +748,24 @@
     const ldt = ldTension(colI.dbL, I.fc, I.fy, 1, true);
     const lap = 1.3 * ldt; // espera para empalme clase B (§12.15.1)
     const zBot = zb + r + (I.dbx + I.dby) / 1000 + colI.dbL / 2000, zTop = 0 + lap;
-    const hookC = colI.ancCol === 'gancho', hlc = 12 * colI.dbL / 1000;
+    const hookC = colI.ancCol === 'gancho', rbc = bendR(I, colI.dbL), hlc = rbc + 12 * colI.dbL / 1000;
     const cbars = sec.bars.map(s => {
       const x = ex0 + s.x, y = ey0 + s.y, pts = [];
       if (hookC) { const dx = Math.abs(s.x) >= Math.abs(s.y) * sec.b / sec.h ? Math.sign(s.x) || 1 : 0, dy = dx ? 0 : (Math.sign(s.y) || 1); pts.push([x + dx * hlc, y + dy * hlc, zBot]); }
       pts.push([x, y, zBot], [x, y, zTop]);
       return pts;
     });
-    const lenC = zTop - zBot + (hookC ? hlc : 0);
+    const lenC = zTop - zBot + (hookC ? hlc - (2 - Math.PI / 2) * rbc : 0);
     groups.push({ id: 'P5', name: 'Longitudinal fuste', kind: 'col', db: colI.dbL, n: sec.n, bars: cbars, hook: hookC, len: lenC, hookLen: hookC ? hlc : 0, kg: sec.n * lenC * kgm(colI.dbL), layer: 'ARM_FUSTE', lap, zBot, zTop });
     // Estribos
     const se = colI.se / 100, off = (colI.dbL / 2 + colI.dbe / 2) / 1000;
     const hx = sec.b / 2 - sec.r + off, hy = sec.h / 2 - sec.r + off;
     const zs = []; for (let z = zt + se / 2; z <= zTop - 0.05 + 1e-9; z += se) zs.push(z);
     const per = 2 * (2 * hx + 2 * hy), hookE = 2 * Math.max(6 * colI.dbe, 75) / 1000; // gancho sísmico/135° (§7.1.3): extensión 6 db ≥ 75 mm
+    // Perímetro completo al eje, con los 3 doblados a 90° desarrollados (el 4.º vértice lo cierran los ganchos)
+    const lenE = per - 3 * (2 - Math.PI / 2) * bendR(I, colI.dbe) + hookE;
     const ties = zs.map(z => [[ex0 - hx, ey0 - hy, z], [ex0 + hx, ey0 - hy, z], [ex0 + hx, ey0 + hy, z], [ex0 - hx, ey0 + hy, z], [ex0 - hx, ey0 - hy, z]]);
-    groups.push({ id: 'P6', name: 'Estribos fuste', kind: 'est', db: colI.dbe, s: colI.se, n: zs.length, bars: ties, len: per / 2 + hookE, kg: zs.length * (per / 2 + hookE) * kgm(colI.dbe), layer: 'ESTRIBOS', zs, hx, hy });
+    groups.push({ id: 'P6', name: 'Estribos fuste', kind: 'est', db: colI.dbe, s: colI.se, n: zs.length, bars: ties, len: lenE, kg: zs.length * lenE * kgm(colI.dbe), layer: 'ESTRIBOS', zs, hx, hy });
     // Ganchos suplementarios (ramas adicionales)
     const xs = sec.bars.filter(b => b.f === 'x' && b.y < 0).map(b => b.x).sort((a, b) => a - b);
     const ys = [-(sec.h / 2 - sec.r)].concat(sec.bars.filter(b => b.f === 'y' && b.x < 0).map(b => b.y).sort((a, b) => a - b), [sec.h / 2 - sec.r]);
@@ -774,6 +786,6 @@
   return {
     DIAM, ES, abar, kgm, beta1, fmt, defaults, normalize, validate, solvePressure, coords, weights, depths,
     flexAt, asRequired, rhoMin, phiFlex, ldTension, ldHook, ldComp, punching, colSection, colState, colCapacity,
-    columnAuto, supportedBars, tieMinDiam, colShear, analyze, layout, mkCheck
+    columnAuto, supportedBars, tieMinDiam, bendR, colShear, analyze, layout, mkCheck
   };
 });

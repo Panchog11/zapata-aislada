@@ -235,3 +235,45 @@ test('Memoria Word: paquete .docx con partes, títulos y figuras', () => {
   assert.ok(docx.includes('√f') && docx.includes('φ'), 'símbolos Unicode conservados');
   const z = ZR.toDocx(doc, {}); assert.equal(z[0], 0x50); assert.equal(z[1], 0x4b);
 });
+
+test('Exportación a Revit: geometría y cantidades coinciden con el layout', () => {
+  const ZRV = require('../js/zapata-revit.js');
+  const I = ZC.normalize(null), R = ZC.analyze(I), X = ZRV.toRevit(I, R, { date: '2026-01-01' });
+  assert.equal(X.formato, 'zapata-aislada/revit'); assert.equal(X.unidades, 'm');
+  // Caja de la zapata: B × L centrada, base en −Df y cara superior en −Df + H
+  near(X.zapata.caja.x1 - X.zapata.caja.x0, I.B, 1e-4); near(X.zapata.caja.y1 - X.zapata.caja.y0, I.L, 1e-4);
+  near(X.zapata.caja.z0, -I.Df, 1e-4); near(X.zapata.caja.z1, -I.Df + I.H, 1e-4);
+  near(X.fuste.h, I.Df - I.H, 1e-4);
+  assert.equal(X.grupos.length, R.layout.groups.length);
+  for (const g of X.grupos) {
+    assert.equal(g.barras.length, g.n, `${g.id}: una polilínea por barra`);
+    g.barras.forEach(b => b.forEach(p => assert.equal(p.length, 3)));
+  }
+  // P1 (inferior x): barras rectas de B − 2·rec a la cota del layout
+  const P1 = X.grupos.find(g => g.id === 'P1'), b0 = P1.barras[0];
+  const recta = b0[P1.gancho ? 2 : 1][0] - b0[P1.gancho ? 1 : 0][0];
+  near(recta, I.B - 2 * I.rec / 1000, 1e-4);
+  assert.ok(JSON.parse(JSON.stringify(X)));
+});
+
+test('Ganchos a 90°: 12φ rectos después del doblado y desarrollo por el eje', () => {
+  const I = ZC.normalize({ ancZ: 'gancho', dbx: 16, sx: 15 }), R = ZC.analyze(I), P1 = R.layout.groups.find(g => g.id === 'P1');
+  // φ16 ≤ 25 → Ø interior 6φ = 96 mm; radio al eje = (96 + 16)/2 = 56 mm
+  near(ZC.bendR(I, 16), 0.056, 1e-9);
+  const b = P1.bars[0], pata = b[0][2] - b[1][2];
+  near(pata, 0.056 + 0.192, 1e-9, 'pata desde el vértice = r + 12φ');
+  // desarrollo = (recta − 2r) + 2·(π·r/2) + 2·12φ
+  const recta = I.B - 2 * I.rec / 1000;
+  near(P1.len, recta - 2 * 0.056 + Math.PI * 0.056 + 2 * 0.192, 1e-9);
+  const ch = R.checks.find(c => c.key === 'ghP1');
+  assert.ok(ch, 'verificación de altura del gancho'); near(ch.c, 248 + 8, 1e-6);
+  // φ32 → 8φ; φ40 → 10φ (tabla por defecto)
+  near(ZC.bendR(I, 32), (8 * 32 + 32) / 2000, 1e-12); near(ZC.bendR(I, 40), (10 * 40 + 40) / 2000, 1e-12);
+});
+
+test('Estribo cerrado: perímetro completo al eje + 2 ganchos de 135° (6φ ≥ 75 mm)', () => {
+  const I = ZC.normalize(null), R = ZC.analyze(I), P6 = R.layout.groups.find(g => g.id === 'P6');
+  const per = 4 * P6.hx + 4 * P6.hy, rb = ZC.bendR(I, P6.db);
+  near(P6.len, per - 3 * (2 - Math.PI / 2) * rb + 2 * Math.max(6 * P6.db, 75) / 1000, 1e-12);
+  assert.ok(P6.len > per, 'el estribo no puede ser más corto que su perímetro');
+});
