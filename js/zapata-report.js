@@ -42,6 +42,13 @@
     kv([['Planta B × L (x × y)', `${f(I.B, 2)} × ${f(I.L, 2)} m`], ['Altura H', `${f(I.H, 2)} m`], ['Profundidad Df · cota de fundación', `${f(I.Df, 2)} m · ${f(-I.Df, 2)}`], ['Fuste cx × cy', `${f(I.cx, 2)} × ${f(I.cy, 2)} m`], ['Excentricidad del fuste ex₀ · ey₀', `${f(I.ex0, 2)} · ${f(I.ey0, 2)} m`], ['Esfuerzos aplicados en', I.apl === 'terr' ? 'nivel de terreno ±0,00' : 'cara superior de la zapata'], ['Recubrimientos inferior · superior · fuste', `${I.rec} · ${I.recSup} · ${I.recCol} mm`]]);
     h2('3.3 Suelo y criterios geotécnicos');
     kv([['Tensión admisible σadm', `${f(I.sadm, 0)} kPa (${f(I.sadm / 98.0665, 2)} kg/cm²)`], ['Tensión máxima en borde admitida', `${f(I.kmax, 2)} · σadm = ${f(I.kmax * I.sadm, 0)} kPa`], ['Peso unitario del relleno γs', `${f(I.gs, 1)} kN/m³`], ['Fricción μ · adhesión ca', `${f(I.mu, 2)} · ${f(I.ca, 0)} kPa`], ['Área comprimida mínima', `${f(I.Amin, 0)} %`], ['FS vuelco · FS deslizamiento', `${f(I.FSv, 2)} · ${f(I.FSd, 2)}`]]);
+    if (I.asOn) {
+      p(`Estratos para el cálculo de asentamientos (desde ±0,00). Nivel freático a ${I.nf >= 50 ? 'gran profundidad (no se considera)' : f(I.nf, 2) + ' m'}. Asentamiento admisible: ${f(I.sAdm, 0)} mm.`, true);
+      let z = 0;
+      table(['Estrato', 'Desde [m]', 'Hasta [m]', 'γ [kN/m³]', 'γsat [kN/m³]', 'Método', 'Parámetros'],
+        I.estratos.map(t => { const a = z; z += t.h; return [t.nombre, f(a, 2), f(z, 2), f(t.g, 1), f(t.gsat, 1), t.met === 'edo' ? 'Edométrico' : 'Consolidación', t.met === 'edo' ? `Eoed = ${f(t.E, 1)} MPa` : `Cc = ${f(t.Cc, 3)}; Cr = ${f(t.Cr, 3)}; e0 = ${f(t.e0, 2)}; OCR = ${f(t.OCR, 2)}`]; }),
+        [0.2, 0.1, 0.1, 0.1, 0.11, 0.14, 0.25]);
+    }
     h2('3.4 Cargas y combinaciones');
     p('Convención: My(+) y Vx(+) comprimen el borde +x; Mx(+) y Vy(+) comprimen el borde +y; N(+) es compresión; Mz es el torsor alrededor del eje vertical. γD mayora el peso propio y el relleno en las combinaciones últimas.', true);
     table(['Comb.', 'Tipo', 'Descripción', 'N [kN]', 'Vx [kN]', 'Vy [kN]', 'Mx [kN·m]', 'My [kN·m]', 'Mz [kN·m]', 'γD'],
@@ -72,8 +79,20 @@
     table(['Comb.', 'P [kN]', 'Mx,b [kN·m]', 'My,b [kN·m]', 'ex [m]', 'ey [m]', 'σmax [kPa]', 'σmin [kPa]', 'Contacto'],
       R.serv.map(s => s.fail ? [s.id, f(s.P, 1), f(s.Mx, 1), f(s.My, 1), { text: s.fail, st: 'bad', span: 5 }] : [s.id, f(s.P, 1), f(s.Mx, 1), f(s.My, 1), f(s.ex, 3), f(s.ey, 3), f(s.sMax, 1), f(s.sMin, 1), f(s.contact * 100, 0) + ' %']),
       [0.08, 0.11, 0.12, 0.12, 0.1, 0.1, 0.13, 0.12, 0.12]);
+    let n5 = 3;
+    if (R.settle && !R.settle.noStrata) {
+      const S = R.settle;
+      h2(`5.${n5++} Asentamientos (combinación ${S.combo})`);
+      p(`Presión neta q = P/(B·L) − σv0(Df) = ${f(S.qc, 1)} − ${f(S.s0, 1)} = ${f(S.q, 1)} kPa. Δσz por Boussinesq con factores de Newmark (superposición de 4 rectángulos) bajo el centro y bajo el punto característico (0,37·B; 0,37·L desde el centro), que representa el asentamiento de la zapata rígida. Subcapas de hasta ${f(Math.min(0.25, I.B / 10), 2)} m; la suma se corta cuando Δσz ≤ ${f(I.asK, 2)}·σ'v0. Granulares: s = Δσz·Δz/Eoed. Cohesivos: consolidación primaria con σ'p = OCR·σ'0.`, true);
+      table(['Estrato', 'Tramo considerado [m]', 's parcial [mm]'],
+        S.lay.map(l => [l.nombre, l.z0 === null ? 'fuera de la profundidad de influencia' : `${f(l.z0, 2)} a ${f(l.z1, 2)}`, f(l.s * 1000, 1)]).concat([[{ text: 'Total adoptado', b: true }, I.asPunto === 'cen' ? 'centro (base flexible)' : 'punto característico (base rígida)', { text: f(S.s * 1000, 1), b: true }]]),
+        [0.4, 0.38, 0.22]);
+      table(['z [m]', "σ'v0 [kPa]", 'Δσz centro [kPa]', 'Δσz pto. caract. [kPa]', 's centro [mm]', 's pto. caract. [mm]'],
+        S.subs.map(u => [`${f(u.z0, 2)} – ${f(u.z1, 2)}`, f(u.se, 1), f(u.dc, 1), f(u.dk, 1), f(u.sc * 1000, 2), f(u.sk * 1000, 2)]),
+        [0.18, 0.15, 0.17, 0.2, 0.15, 0.15]);
+    }
     if (R.ult) {
-      h2('5.3 Solicitaciones últimas en la zapata');
+      h2(`5.${n5++} Solicitaciones últimas en la zapata`);
       p('Presión bruta σu bajo la combinación mayorada menos el peso propio y el relleno mayorados (wu = γD·(H·γc + (Df − H)·γs)). Momentos por metro de ancho; Mu+ tracciona la cara inferior y Mu− la superior. Se barren 24 secciones por voladizo.', true);
       table(['Comb.', 'Pc [kN]', 'σu máx [kPa]', 'Mu+ x', 'Mu+ y', 'Mu− x', 'Mu− y', 'Vu x [kN]', 'Vu y [kN]', 'Vu punz. [kN]'],
         R.ult.map(u => u.sol.fail ? [u.id, f(u.Pc, 1), { text: u.sol.fail, st: 'bad', span: 8 }] : [u.id, f(u.Pc, 1), f(u.sol.sMax, 1), f(u.fx.Mpos / I.L, 1), f(u.fy.Mpos / I.B, 1), f(u.fx.Mneg / I.L, 1), f(u.fy.Mneg / I.B, 1), f(u.vx.V, 1), f(u.vy.V, 1), u.p.na ? '—' : f(u.p.Vu, 1)]),
@@ -81,7 +100,7 @@
       p('Momentos en kN·m/m.', true);
     }
     // Verificaciones detalladas
-    let sec = 4;
+    let sec = n5;
     const groups = []; R.checks.forEach(c => { let g = groups.find(x => x.g === c.g); if (!g) groups.push(g = { g: c.g, items: [] }); g.items.push(c); });
     groups.forEach(g => {
       h2(`5.${sec++} ${g.g}`);
@@ -113,7 +132,7 @@
     h1('8. Hipótesis y limitaciones');
     list([
       'Zapata rígida con distribución lineal de presiones sin tracciones.',
-      'No se considera el empuje pasivo lateral del suelo ni se calculan asentamientos.',
+      'No se considera el empuje pasivo lateral del suelo. Los asentamientos se calculan con la carga media de la combinación elegida (sin momentos), sin asentamiento inmediato no drenado ni consolidación secundaria.',
       'Fuste: flexo-compresión oblicua por compatibilidad de deformaciones (εcu = 0,003, bloque rectangular, §10.2) en la sección de unión con la zapata; corte verificado por dirección.',
       'La tracción en barras del fuste (para elegir el anclaje) se detecta con la sección bruta elástica bajo cargas mayoradas.',
       'No se aplica la reducción de longitudes de anclaje por exceso de armadura (§12.2.5).',

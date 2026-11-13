@@ -110,7 +110,8 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
 .svgwrap svg{display:block;width:100%;height:auto;min-width:300px}
 .elevs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;border-top:1px solid var(--line2)}
 .elevs>div+div{border-left:1px solid var(--line2)}
-.elevs h3{font-size:15px;font-weight:600;padding:10px 14px 0}
+.elevs h3,.asprof h3{font-size:15px;font-weight:600;padding:10px 14px 0}
+.asprof{border-top:1px solid var(--line2)}
 @media (max-width:1100px){.elevs{grid-template-columns:minmax(0,1fr)}.elevs>div+div{border-left:0;border-top:1px solid var(--line2)}}
 .cap{font-size:12.5px;color:var(--muted);padding:6px 14px 12px;display:flex;flex-wrap:wrap;gap:4px 16px}
 .cap b{color:var(--ink);font-weight:500}
@@ -271,6 +272,7 @@ svg text{font-family:var(--f-mono);fill:var(--ink)}
           <div><h3>Corte A-A · dirección x</h3><div class="svgwrap" id="elx"></div></div>
           <div><h3>Corte B-B · dirección y</h3><div class="svgwrap" id="ely"></div></div>
         </div>
+        <div class="asprof"><h3>Perfil de suelo y asentamientos</h3><div class="svgwrap" id="asp"></div><div class="cap" id="aspCap"></div></div>
       </div>
 
       <div data-panel="3d" hidden>
@@ -375,6 +377,7 @@ const GROUPS = [
     ['gs', 'Peso unitario γs', 'relleno sobre zapata', 'kN/m³', 0.5], ['mu', 'Coef. fricción μ = tan δ', 'base–suelo', '—', 0.01],
     ['ca', 'Adhesión ca', '', 'kPa', 1], ['Amin', 'Área comprimida mínima', '% de B·L', '%', 5],
     ['FSv', 'FS vuelco', '', '—', 0.1], ['FSd', 'FS deslizamiento', '', '—', 0.1]]},
+  { n: '3b', t: 'Estratos y asentamientos', estr: true },
   { n: 4, t: 'Geometría de la zapata y el fuste', open: true, f: [
     ['B', 'Ancho B', 'dirección x', 'm', 0.05], ['L', 'Largo L', 'dirección y', 'm', 0.05], ['H', 'Altura H', '', 'm', 0.05],
     ['Df', 'Cota de fundación Df', 'profundidad desde ±0,00', 'm', 0.05],
@@ -417,7 +420,14 @@ function buildInputs() {
   let h = '';
   GROUPS.forEach(g => {
     h += `<details class="grp" ${g.open ? 'open' : ''} ${g.combos ? 'open' : ''}><summary><span class="n">${g.n}</span>${g.t}</summary>`;
-    if (g.combos) h += `<div class="fields"><div id="combos" style="display:grid;gap:8px"></div>
+    if (g.estr) h += `<div class="fields">${[['asOn', 'Verificar asentamientos', 'chk'], ['asCombo', 'Combinación de servicio', 'sel', []], ['nf', 'Nivel freático', 'profundidad desde ±0,00 (99 = sin NF)', 'm', 0.1], ['sAdm', 'Asentamiento admisible', 'estudio geotécnico', 'mm', 1],
+        ['asPunto', 'Asentamiento adoptado', 'sel', [['car', 'Punto característico (rígida)'], ['cen', 'Centro (flexible)']]], ['asK', 'Prof. de influencia: Δσz ≤ k·σ\'v0', 'k', '—', 0.05]].map(fieldHTML).join('')}
+      <div class="sub">Estratos (desde ±0,00 hacia abajo)</div><div id="estr" style="display:grid;gap:8px"></div>
+      <div class="row-btns"><button class="btn" id="addE" type="button">+ Estrato</button></div>
+      <div class="hint">Edométrico: Eoed del estudio geotécnico (suelos granulares o arcillas con módulo). Consolidación: Cc, Cr, e0 y OCR (arcillas). El último estrato se prolonga si hace falta para las tensiones, pero el asentamiento sólo se suma dentro de los estratos definidos.</div>
+      <div class="sub">Zapata vecina (opcional)</div>
+      ${[['lVec', 'Distancia entre ejes', '0 = no verificar', 'm', 0.1], ['sVec', 'Asentamiento de la vecina', '', 'mm', 1], ['betaLim', 'Distorsión límite 1/…', '', '—', 50]].map(fieldHTML).join('')}</div>`;
+    else if (g.combos) h += `<div class="fields"><div id="combos" style="display:grid;gap:8px"></div>
       <div class="row-btns"><button class="btn" id="addS" type="button">+ Servicio</button><button class="btn" id="addU" type="button">+ Última</button></div>
       <div class="row-btns"><button class="btn" id="bFac" type="button">Generar última = γ × servicio</button><label class="hint" for="gf">γ</label><input type="number" id="gf" data-k="gf" step="0.05"></div>
       <div class="hint">Servicio: verificaciones de suelo y estabilidad. Últimas: dimensionamiento de H°A° (CIRSOC 201-2005 §9.2). γD mayora el peso propio y el relleno en cada combinación última. Convención: My(+) y Vx(+) comprimen el borde +x; Mx(+) y Vy(+) el borde +y; N(+) compresión; Mz torsor.</div></div>`;
@@ -433,13 +443,25 @@ function renderCombos() {
     <div class="combo-g">${[['N', 'kN'], ['Vx', 'kN'], ['Vy', 'kN'], ['Mx', 'kN·m'], ['My', 'kN·m'], ['Mz', 'kN·m']].map(([k, u]) => `<label>${k} <small>${u}</small><input type="number" step="any" data-c="${i}" data-ck="${k}" value="${c[k]}"></label>`).join('')}
     ${c.tipo === 'ult' ? `<label>γD peso propio<input type="number" step="0.05" data-c="${i}" data-ck="gD" value="${c.gD}"></label>` : ''}</div></div>`).join('');
 }
+function renderEstr() {
+  let z = 0;
+  $('estr').innerHTML = ST.estratos.map((t, i) => { const a = z; z += +t.h || 0; return `<div class="combo serv">
+    <div class="combo-h" style="grid-template-columns:minmax(0,1fr) 120px 26px"><input type="text" data-e="${i}" data-ek="nombre" value="${esc(t.nombre)}" aria-label="Nombre del estrato"><select data-e="${i}" data-ek="met" aria-label="Método"><option value="edo" ${t.met === 'edo' ? 'selected' : ''}>Edométrico</option><option value="cons" ${t.met === 'cons' ? 'selected' : ''}>Consolidación</option></select><button class="xbtn" type="button" data-edel="${i}" aria-label="Eliminar ${esc(t.nombre)}">×</button></div>
+    <div class="hint">${f(a, 2)} a ${f(z, 2)} m</div>
+    <div class="combo-g">${[['h', 'espesor m'], ['g', 'γ kN/m³'], ['gsat', 'γsat kN/m³']].concat(t.met === 'edo' ? [['E', 'Eoed MPa']] : [['Cc', 'Cc'], ['Cr', 'Cr'], ['e0', 'e0'], ['OCR', 'OCR']]).map(([k, l]) => `<label>${l}<input type="number" step="any" data-e="${i}" data-ek="${k}" value="${t[k]}"></label>`).join('')}</div></div>`; }).join('');
+}
+function renderAsCombo() {
+  const sel = $('asCombo'), sv = ST.combos.filter(c => c.tipo === 'serv');
+  sel.innerHTML = '<option value="">Primera de servicio</option>' + sv.map(c => `<option value="${esc(c.id)}">${esc(c.id)}${c.desc ? ' · ' + esc(c.desc) : ''}</option>`).join('');
+  sel.value = sv.some(c => c.id === ST.asCombo) ? ST.asCombo : '';
+}
 function setInputs() {
   document.querySelectorAll('[data-k]').forEach(el => {
     const k = el.dataset.k, v = k === 'estMinTxt' ? ST.estMin.map(p => p.join(':')).join(', ') : k === 'dobMinTxt' ? ST.dobMin.map(p => p.join(':')).join(', ') : ST[k];
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
   });
   document.querySelectorAll('#diamZ input').forEach(el => { el.checked = ST.diamZ.includes(+el.value); });
-  renderCombos(); syncEnable();
+  renderCombos(); renderEstr(); renderAsCombo(); syncEnable();
 }
 function syncEnable() {
   ['dbxs', 'sxs'].forEach(k => { $(k).disabled = !ST.supX; }); ['dbys', 'sys'].forEach(k => { $(k).disabled = !ST.supY; });
@@ -465,7 +487,7 @@ function update() {
   syncEnable();
   const ca = $('colAutoVal');
   ca.textContent = R.colAuto ? `Adoptado: ${2 * R.colAuto.nbx + 2 * R.colAuto.nby - 4} φ${R.colAuto.dbL} (${R.colAuto.nbx}×${R.colAuto.nby}) · estribos φ${R.colAuto.dbe} c/${f(R.colAuto.se, 1)} cm` : (ST.colModo === 'auto' ? 'Sin solución automática dentro de 1 % – 8 %' : '');
-  renderStatus(); renderResults(); renderMemo(); renderComboSelect(); renderDrawings();
+  renderAsCombo(); renderStatus(); renderResults(); renderMemo(); renderComboSelect(); renderDrawings();
   if (viewer && !$('v3d').closest('[hidden]')) viewer.build(ST, R);
   else if (viewer) viewer._stale = true;
   lastDrawing = null;
@@ -573,7 +595,42 @@ function selSol() {
   const u = (R.ult || []).find(q => q.id === id);
   return u ? { sol: u.sol, c: u.c, ult: true } : null;
 }
+function drawSettle() {
+  const S = R.settle, I = R.I;
+  if (!I.asOn) return '<p class="hint" style="padding:0 14px">Verificación de asentamientos desactivada.</p>';
+  if (!S) return '';
+  const zmax = Math.max(S.Ht, S.zInf + 0.5), W = 640, top = 34, Hh = 400, ph = Hh - top - 30, Z = z => top + z / zmax * ph;
+  const cx0 = 70, cx1 = 230, px0 = 300, px1 = 610;
+  const smax = Math.max(S.q, ...S.subs.map(u => I.asK * u.se), 1), X = v => px0 + v / smax * (px1 - px0);
+  let o = '', z = 0;
+  const fills = ['var(--soil-fill)', 'var(--sunk)', 'var(--concrete)'];
+  I.estratos.forEach((t, i) => {
+    const a = z; z += t.h; const y0 = Z(a), y1 = Z(Math.min(z, zmax));
+    o += `<rect x="${cx0}" y="${R2(y0)}" width="${cx1 - cx0}" height="${R2(y1 - y0)}" fill="${fills[i % 3]}" stroke="var(--line)"/>`;
+    const L = S.lay[i];
+    if (y1 - y0 > 16) o += `<text class="t" x="${cx0 + 6}" y="${R2(y0 + 14)}">${esc(t.nombre)}</text>`;
+    if (y1 - y0 > 30) o += `<text class="ts" x="${cx0 + 6}" y="${R2(y0 + 27)}">${t.met === 'edo' ? 'Eoed ' + f(t.E, 0) + ' MPa' : 'Cc ' + f(t.Cc, 2) + ' · OCR ' + f(t.OCR, 1)} · s = ${f(L.s * 1000, 1)} mm</text>`;
+    o += `<text class="ts" x="${cx0 - 6}" y="${R2(y1 + 4)}" text-anchor="end">${f(z, 2)}</text>`;
+  });
+  o += `<text class="ts" x="${cx0 - 6}" y="${top + 4}" text-anchor="end">0,00</text>`;
+  // zapata
+  const fw = px0 - cx1 - 24, fx = cx1 + 12;
+  o += `<rect class="conc" x="${fx}" y="${R2(Z(I.Df - I.H))}" width="${fw}" height="${R2(Z(I.Df) - Z(I.Df - I.H))}"/>`;
+  if (I.nf < zmax) o += `<line x1="${cx0 - 20}" y1="${R2(Z(I.nf))}" x2="${px1}" y2="${R2(Z(I.nf))}" stroke="var(--colbar)" stroke-dasharray="6 4"/><text class="ts" x="${cx1 + 6}" y="${R2(Z(I.nf) - 4)}" style="fill:var(--colbar)">NF ${f(I.nf, 2)}</text>`;
+  // gráfico de tensiones
+  o += `<line class="dim" x1="${px0}" y1="${top}" x2="${px0}" y2="${top + ph}"/><line class="dim" x1="${px0}" y1="${top}" x2="${px1}" y2="${top}"/>`;
+  [0, 0.25, 0.5, 0.75, 1].forEach(k => { const v = smax * k; o += `<text class="ts" x="${R2(X(v))}" y="${top - 6}" text-anchor="middle">${f(v, 0)}</text>`; });
+  o += `<text class="ts" x="${px1}" y="${top - 20}" text-anchor="end">kPa</text>`;
+  const pl = (k, cls, extra) => S.subs.length ? `<polyline fill="none" class="${cls}" ${extra || ''} points="${S.subs.map(u => R2(X(u[k] === undefined ? I.asK * u.se : u[k])) + ',' + R2(Z(u.zc))).join(' ')}"/>` : '';
+  o += pl('dc', 'load') + pl('dk', 'load', 'stroke-dasharray="5 3"') + pl('kse', 'press', 'style="stroke:var(--soil);stroke-width:1.6"');
+  o += `<line x1="${px0}" y1="${R2(Z(S.zInf))}" x2="${px1}" y2="${R2(Z(S.zInf))}" stroke="var(--bad)" stroke-dasharray="3 3"/><text class="ts" x="${px1}" y="${R2(Z(S.zInf) - 4)}" text-anchor="end" style="fill:var(--bad)">prof. de influencia ${f(S.zInf, 2)} m</text>`;
+  const smm = S.s * 1000;
+  o += `<text class="tl" x="${cx0}" y="18">s = ${f(smm, 1)} mm ${smm <= I.sAdm ? '≤' : '>'} ${f(I.sAdm, 0)} mm · comb. ${esc(S.combo)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Perfil de suelo y asentamientos">${o}</svg>`;
+}
 function renderDrawings() {
+  $('asp').innerHTML = R.err ? '' : drawSettle();
+  $('aspCap').innerHTML = R.settle && !R.err ? `<span><b>Línea llena:</b> Δσz bajo el centro</span><span><b>Discontinua:</b> Δσz bajo el punto característico</span><span><b>Marrón:</b> ${f(R.I.asK, 2)}·σ'v0</span><span>q neta = ${f(R.settle.q, 1)} kPa · s centro = ${f(R.settle.sCen * 1000, 1)} mm · s punto característico = ${f(R.settle.sCar * 1000, 1)} mm</span>` : '';
   if (R.err) { $('plan').innerHTML = ''; $('elx').innerHTML = ''; $('ely').innerHTML = ''; $('planCap').innerHTML = ''; return; }
   const S = selSol();
   $('plan').innerHTML = drawPlan(S); $('elx').innerHTML = drawElev(S, 'x'); $('ely').innerHTML = drawElev(S, 'y');
@@ -795,12 +852,17 @@ setInputs();
 
 $('inputs').addEventListener('input', e => {
   const el = e.target;
+  if (el.dataset.e !== undefined) { const t = ST.estratos[+el.dataset.e], k = el.dataset.ek; t[k] = ['nombre', 'met'].includes(k) ? el.value : parseFloat(el.value); if (k === 'met' || k === 'h') renderEstrKeep(el); schedule(); return; }
   if (el.dataset.k) readField(el);
   else if (el.dataset.c !== undefined) { const c = ST.combos[+el.dataset.c], k = el.dataset.ck; c[k] = ['id', 'desc', 'tipo'].includes(k) ? el.value : parseFloat(el.value); if (k === 'tipo') { if (el.value === 'ult' && !c.gD) c.gD = 1.2; renderCombos(); } }
   schedule();
 });
 $('inputs').addEventListener('change', e => { const el = e.target; if (el.dataset.k) { readField(el); schedule(); } else if (el.dataset.ck === 'tipo') { ST.combos[+el.dataset.c].tipo = el.value; renderCombos(); schedule(); } });
+function renderEstrKeep(el) { const k = el.dataset.ek, i = el.dataset.e; renderEstr(); const n = document.querySelector(`[data-e="${i}"][data-ek="${k}"]`); if (n && k !== 'met') { n.focus(); try { const v = n.value.length; n.setSelectionRange && n.type === 'text' && n.setSelectionRange(v, v); } catch (x) { } } }
 $('inputs').addEventListener('click', e => {
+  const de = e.target.closest('[data-edel]');
+  if (de) { if (ST.estratos.length <= 1) { toast('Debe quedar al menos un estrato.'); return; } ST.estratos.splice(+de.dataset.edel, 1); renderEstr(); schedule(); return; }
+  if (e.target.id === 'addE') { const l = ST.estratos[ST.estratos.length - 1] || {}; ST.estratos.push({ nombre: `Estrato ${ST.estratos.length + 1}`, h: 2, g: l.g || 18, gsat: l.gsat || 19, met: 'edo', E: 20, Cc: 0.2, Cr: 0.03, e0: 0.7, OCR: 1 }); renderEstr(); schedule(); return; }
   const d = e.target.closest('[data-del]');
   if (d) { if (ST.combos.length <= 1) { toast('Debe quedar al menos una combinación.'); return; } ST.combos.splice(+d.dataset.del, 1); renderCombos(); schedule(); }
   if (e.target.id === 'addS' || e.target.id === 'addU') {

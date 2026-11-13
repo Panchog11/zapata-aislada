@@ -277,3 +277,53 @@ test('Estribo cerrado: perímetro completo al eje + 2 ganchos de 135° (6φ ≥ 
   near(P6.len, per - 3 * (2 - Math.PI / 2) * rb + 2 * Math.max(6 * P6.db, 75) / 1000, 1e-12);
   assert.ok(P6.len > per, 'el estribo no puede ser más corto que su perímetro');
 });
+
+test('Asentamientos: factor de Newmark y Δσz bajo el centro (Boussinesq)', () => {
+  near(ZC.newmarkI(1, 1), 0.17522, 5e-5);          // valor de tabla (m = n = 1)
+  near(ZC.newmarkI(1e6, 1e6), 0.25, 1e-4);         // semiespacio cargado en un cuadrante
+  near(ZC.newmarkI(0.5, 2), 0.1350, 1e-4);          // valor de tabla (m = 0,5; n = 2)
+  near(ZC.newmarkI(0.5, 1), 0.1202, 1e-4);          // valor de tabla (m = 0,5; n = 1)
+  // centro de un cuadrado de 2 × 2 m a z = 1 m: 4·I(1; 1) = 0,7009
+  near(ZC.stressRect(100, 2, 2, 0, 0, 1), 70.09, 0.01);
+  near(ZC.stressRect(100, 2, 2, 0, 0, 0), 100, 1e-9);
+});
+
+test('Asentamientos: tensiones verticales con nivel freático', () => {
+  const I = Object.assign(ZC.defaults(), { nf: 2, estratos: [{ nombre: 'A', h: 10, g: 18, gsat: 20, met: 'edo', E: 10 }] });
+  near(ZC.sigmaV(I, 4, true), 2 * 18 + 2 * (20 - 9.81), 1e-9);   // 56,38 kPa
+  near(ZC.sigmaV(I, 4, false), 2 * 18 + 2 * 20, 1e-9);            // 76 kPa
+});
+
+test('Asentamientos: zapata muy ancha = compresión unidimensional (edométrico y consolidación)', () => {
+  // B = L = 40 m: Δσz ≈ q en el primer metro bajo la base
+  const base = { B: 40, L: 40, Df: 1, nf: 99, asK: 0.001, asPunto: 'cen' };
+  const Ie = Object.assign(ZC.defaults(), base, { estratos: [{ nombre: 'A', h: 2, g: 20, gsat: 20, met: 'edo', E: 10 }] });
+  const P = (100 + 20) * 1600; // q neta = 100 kPa (tapada 20 kPa)
+  const Se = ZC.settlement(Ie, P);
+  near(Se.q, 100, 1e-9);
+  rel(Se.s, 100 * 1 / 10000, 0.002, 's = q·h/Eoed = 10 mm');
+  // arcilla NC en una sola subcapa de 0,2 m: s = Cc·h/(1+e0)·log((σ'0 + q)/σ'0), σ'0 = 20·1,1 = 22 kPa
+  const Ic = Object.assign(ZC.defaults(), base, { estratos: [{ nombre: 'C', h: 1.2, g: 20, gsat: 20, met: 'cons', Cc: 0.3, Cr: 0.05, e0: 1, OCR: 1 }] });
+  const Sc = ZC.settlement(Ic, P);
+  const ref = 0.3 * 0.2 / 2 * Math.log10((22 + 100) / 22);
+  rel(Sc.s, ref, 0.003, 'NC');
+  // preconsolidada con σ'p = 3·σ'0 = 66 kPa < σ'f: tramo de recompresión + tramo virgen
+  const Io = Object.assign(ZC.defaults(), base, { estratos: [{ nombre: 'C', h: 1.2, g: 20, gsat: 20, met: 'cons', Cc: 0.3, Cr: 0.05, e0: 1, OCR: 3 }] });
+  const refO = 0.2 / 2 * (0.05 * Math.log10(66 / 22) + 0.3 * Math.log10(122 / 66));
+  rel(ZC.settlement(Io, P).s, refO, 0.003, 'OC');
+});
+
+test('Asentamientos: verificación integrada, sensibilidad y profundidad de influencia', () => {
+  const R = ZC.analyze(ZC.defaults());
+  const c = R.checks.find(k => k.key === 'asent');
+  assert.equal(c.st, 'ok'); assert.ok(R.settle.sCar < R.settle.sCen, 'rígida < centro flexible');
+  const I2 = ZC.defaults(); I2.combos[0].N = 1600;
+  assert.ok(ZC.analyze(I2).settle.s > R.settle.s, 'más carga → más asentamiento');
+  const I3 = ZC.defaults(); I3.estratos = [I3.estratos[0]];
+  assert.equal(ZC.analyze(I3).checks.find(k => k.key === 'asprof').st, 'nv', 'estratos insuficientes → no verificado');
+  const I4 = ZC.defaults(); I4.lVec = 5; I4.sVec = 0; I4.betaLim = 500;
+  const b = ZC.analyze(I4).checks.find(k => k.key === 'asdist');
+  near(b.d, R.settle.s * 1000 / 5000, 1e-9);
+  const I5 = ZC.defaults(); I5.sAdm = 5;
+  assert.equal(ZC.analyze(I5).checks.find(k => k.key === 'asent').st, 'bad');
+});

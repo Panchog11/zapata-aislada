@@ -46,6 +46,13 @@
       gf: 1.4,
       // 3. Suelo
       sadm: 200, kmax: 1.25, gs: 18, mu: 0.45, ca: 0, Amin: 50, FSv: 1.5, FSd: 1.5,
+      // 3b. Asentamientos: estratos desde ±0,00 hacia abajo
+      asOn: true, nf: 3.0, sAdm: 25, asCombo: '', asK: 0.10, asPunto: 'car', sVec: 0, lVec: 0, betaLim: 500,
+      estratos: [
+        { nombre: 'Limo arcilloso', h: 2.5, g: 18, gsat: 19, met: 'edo', E: 12, Cc: 0.2, Cr: 0.03, e0: 0.8, OCR: 1 },
+        { nombre: 'Arcilla preconsolidada', h: 3.0, g: 18.5, gsat: 19.5, met: 'cons', E: 10, Cc: 0.22, Cr: 0.035, e0: 0.75, OCR: 3 },
+        { nombre: 'Arena densa', h: 8.0, g: 19, gsat: 20, met: 'edo', E: 45, Cc: 0.1, Cr: 0.02, e0: 0.6, OCR: 1 }
+      ],
       // 4. Geometría
       B: 2.6, L: 2.6, H: 0.6, Df: 1.5, cx: 0.4, cy: 0.4, ex0: 0, ey0: 0, apl: 'sup',
       // 5. Armadura de la zapata
@@ -67,10 +74,14 @@
     const D = defaults(), I = JSON.parse(JSON.stringify(D));
     if (!raw || typeof raw !== 'object') return I;
     for (const k in D) {
-      if (raw[k] === undefined || k === 'combos') continue;
+      if (raw[k] === undefined || k === 'combos' || k === 'estratos') continue;
       if (typeof D[k] === 'number') I[k] = parseFloat(raw[k]);
       else if (typeof D[k] === 'boolean') I[k] = raw[k] === true || raw[k] === 'true';
       else I[k] = raw[k];
+    }
+    if (Array.isArray(raw.estratos)) {
+      I.estratos = raw.estratos.map((e, i) => ({ nombre: String(e.nombre || `Estrato ${i + 1}`), met: e.met === 'cons' ? 'cons' : 'edo',
+        h: +e.h, g: +e.g, gsat: +e.gsat, E: +e.E, Cc: +e.Cc, Cr: +e.Cr, e0: +e.e0, OCR: e.OCR === undefined ? 1 : +e.OCR }));
     }
     if (Array.isArray(raw.combos) && raw.combos.length) {
       I.combos = raw.combos.map((c, i) => ({
@@ -102,6 +113,17 @@
     if (I.supX && !(I.sxs > 0)) e.push('Separación de la armadura superior x inválida.');
     if (I.supY && !(I.sys > 0)) e.push('Separación de la armadura superior y inválida.');
     if (!(I.nbx >= 2) || !(I.nby >= 2)) e.push('El fuste necesita al menos 2 barras por cara (4 esquinas).');
+    if (I.asOn) {
+      if (!I.estratos.length) e.push('Asentamientos: definí al menos un estrato.');
+      I.estratos.forEach((t, i) => {
+        const n = `Estrato ${i + 1} (${t.nombre})`;
+        if (!(t.h > 0) || !(t.g > 0) || !(t.gsat > 0)) e.push(`${n}: espesor y pesos unitarios deben ser mayores que cero.`);
+        if (t.met === 'edo' && !(t.E > 0)) e.push(`${n}: el módulo edométrico debe ser mayor que cero.`);
+        if (t.met === 'cons' && (!(t.Cc > 0) || !(t.Cr >= 0) || !(t.e0 > 0) || !(t.OCR >= 1))) e.push(`${n}: revisar Cc > 0, Cr ≥ 0, e0 > 0 y OCR ≥ 1.`);
+      });
+      if (!(I.sAdm > 0)) e.push('El asentamiento admisible debe ser mayor que cero.');
+      if (!(I.asK > 0)) e.push('El criterio de profundidad de influencia debe ser mayor que cero.');
+    }
     if (e.length) return { errors: e, warns: w };
     if (I.cx > I.B || I.cy > I.L) e.push('El fuste es más grande que la zapata.');
     if (Math.abs(I.ex0) + I.cx / 2 > I.B / 2 + 1e-9 || Math.abs(I.ey0) + I.cy / 2 > I.L / 2 + 1e-9) e.push('El fuste queda fuera de la planta de la zapata (revisar ex₀, ey₀).');
@@ -464,6 +486,75 @@
     return Math.max(5, Math.floor(s / 25) * 2.5); // cm
   }
 
+  /* ---------------- Asentamientos (servicio) ---------------- */
+  /** Factor de influencia de Newmark: esquina de un rectángulo de lados m·z y n·z con carga uniforme (Δσz = q·I). */
+  function newmarkI(m, n) {
+    const m2 = m * m, n2 = n * n, r = Math.sqrt(m2 + n2 + 1);
+    // atan2 aplica la corrección de +π cuando m² + n² + 1 < m²·n²
+    return (2 * m * n * r / (m2 + n2 + m2 * n2 + 1) * (m2 + n2 + 2) / (m2 + n2 + 1) + Math.atan2(2 * m * n * r, m2 + n2 + 1 - m2 * n2)) / (4 * Math.PI);
+  }
+  /** Δσz bajo un punto interior (x, y) de un rectángulo B × L centrado, a la profundidad z bajo la base (superposición de 4 rectángulos). */
+  function stressRect(q, B, L, x, y, z) {
+    if (z <= 1e-9) return q;
+    let s = 0;
+    for (const a of [B / 2 - x, B / 2 + x]) for (const b of [L / 2 - y, L / 2 + y]) if (a > 0 && b > 0) s += newmarkI(a / z, b / z);
+    return q * s;
+  }
+  const GW = 9.81;
+  /** Tensión vertical total o efectiva a la profundidad z (m desde ±0,00); bajo el último estrato se prolonga el último. */
+  function sigmaV(I, z, eff) {
+    let s = 0, top = 0;
+    const E = I.estratos;
+    for (let i = 0; i < E.length && top < z; i++) {
+      const bot = i === E.length - 1 ? Infinity : top + E[i].h, a = top, b = Math.min(z, bot);
+      const dry = Math.max(0, Math.min(b, I.nf) - a), wet = Math.max(0, b - Math.max(a, I.nf));
+      s += dry * E[i].g + wet * (eff ? E[i].gsat - GW : E[i].gsat);
+      top = bot;
+    }
+    return s;
+  }
+  /** Asentamiento por subcapas bajo el centro y bajo el punto característico (0,37·B; 0,37·L desde el centro). */
+  function settlement(I, P) {
+    const { B, L, Df } = I, E = I.estratos, k = I.asK;
+    const Ht = E.reduce((a, t) => a + t.h, 0);
+    const qc = P / (B * L), s0 = sigmaV(I, Df, false), q = qc - s0;
+    const r = { qc, s0, q, Ht, subs: [], lay: E.map(t => ({ nombre: t.nombre, met: t.met, s: 0, z0: null, z1: null })), sCen: 0, sCar: 0, s: 0, zInf: Df, covered: true };
+    if (Df >= Ht) { r.noStrata = true; r.covered = false; return r; }
+    if (q <= 0) return r;
+    const xk = 0.37 * B, yk = 0.37 * L;
+    const bounds = [Df, Ht]; let acc = 0;
+    E.forEach(t => { acc += t.h; if (acc > Df + 1e-9 && acc < Ht - 1e-9) bounds.push(acc); });
+    if (I.nf > Df && I.nf < Ht) bounds.push(I.nf);
+    bounds.sort((a, b) => a - b);
+    const dz = Math.min(0.25, B / 10);
+    let stop = false;
+    for (let j = 0; j < bounds.length - 1 && !stop; j++) {
+      const a = bounds[j], b = bounds[j + 1]; if (b - a < 1e-9) continue;
+      let li = 0, t0 = 0; while (li < E.length - 1 && t0 + E[li].h <= a + 1e-9) { t0 += E[li].h; li++; }
+      const t = E[li], n = Math.max(1, Math.ceil((b - a) / dz - 1e-9)), h = (b - a) / n;
+      for (let i = 0; i < n; i++) {
+        const z0 = a + i * h, zc = z0 + h / 2, zb = zc - Df;
+        const se = sigmaV(I, zc, true), dc = stressRect(q, B, L, 0, 0, zb), dk = stressRect(q, B, L, xk, yk, zb);
+        if (dc <= k * se && r.subs.length) { r.zInf = z0; stop = true; break; }
+        const ds = d => {
+          if (t.met === 'edo') return d * h / (t.E * 1000);
+          const sp = t.OCR * se, sf = se + d, c = h / (1 + t.e0);
+          if (sf <= sp) return t.Cr * c * Math.log10(sf / se);
+          if (se >= sp) return t.Cc * c * Math.log10(sf / se);
+          return c * (t.Cr * Math.log10(sp / se) + t.Cc * Math.log10(sf / sp));
+        };
+        const sc = ds(dc), sk = ds(dk);
+        r.subs.push({ z0, z1: z0 + h, zc, li, se, dc, dk, sc, sk });
+        r.sCen += sc; r.sCar += sk;
+        const Ly = r.lay[li]; Ly.s += I.asPunto === 'cen' ? sc : sk; if (Ly.z0 === null) Ly.z0 = z0; Ly.z1 = z0 + h;
+        r.zInf = z0 + h;
+      }
+    }
+    if (!stop) r.covered = false;
+    r.s = I.asPunto === 'cen' ? r.sCen : r.sCar;
+    return r;
+  }
+
   /* ---------------- Verificaciones ---------------- */
   function mkCheck(o) {
     let u = o.u === undefined ? null : o.u, txt = o.txt;
@@ -519,6 +610,31 @@
         const cT = govS(s => { if (!(Math.abs(s.c.Mz) > 0)) return null; const u = s.Hs / s.Hr + Math.abs(s.c.Mz) / s.Tr; return { s, uu: u, FS: 1 / u, u: I.FSd * u }; });
         add({ key: 'tors', g: gS, n: 'Deslizamiento con torsión Mz', kind: 'fs', d: cT.FS, c: I.FSd, combo: cT.s.id,
           ref: 'Criterio de proyecto (interacción lineal)', formula: '1/FS = H/Hr + |Mz|/Tr,  Tr = ∫(μ·σ + ca)·r dA', subst: `${fmt(cT.s.Hs, 1)}/${fmt(cT.s.Hr, 1)} + ${fmt(Math.abs(cT.s.c.Mz), 1)}/${fmt(cT.s.Tr, 1)} = ${fmt(cT.uu, 3)}`, crit: `FS ≥ ${fmt(I.FSd, 2)}`, sug: 'Aumentar la base o el peso.' });
+      }
+    }
+    // Asentamientos
+    const gA = 'Asentamientos · servicio';
+    if (!I.asOn) add({ key: 'asent', g: gA, n: 'Asentamiento', st: 'na', txt: 'No evaluado (desactivado por el usuario)', ref: 'Criterio de proyecto', formula: '', subst: '', crit: '' });
+    else {
+      const cs = I.combos.find(c => c.tipo === 'serv' && c.id === I.asCombo) || I.combos.find(c => c.tipo === 'serv');
+      const S = settlement(I, cs.N + W.W); S.combo = cs.id; R.settle = S;
+      const smm = S.s * 1000;
+      if (S.noStrata) add({ key: 'asent', g: gA, n: 'Asentamiento', st: 'nv', txt: 'Los estratos definidos no llegan a la cota de fundación', ref: 'Datos del estudio geotécnico', formula: '', subst: '', crit: '', sug: 'Agregar los estratos bajo la base.' });
+      else {
+        add({ key: 'asent', g: gA, n: `Asentamiento total (${I.asPunto === 'cen' ? 'centro, base flexible' : 'punto característico, base rígida'})`, kind: 'le', d: smm, c: I.sAdm, unit: 'mm', dec: 1, combo: cs.id,
+          ref: 'Estudio geotécnico / criterio de proyecto (s adm, dato); Δσz por Boussinesq (factores de Newmark); consolidación primaria de Terzaghi',
+          formula: "q = P/(B·L) − σv0(Df);  Δσz = q·ΣI(m, n);  granular: s = Σ Δσz·Δz/Eoed;  cohesivo: s = Σ Δz/(1 + e0)·[Cr·log(σ'p/σ'0) + Cc·log(σ'f/σ'p)]",
+          subst: `q = ${fmt(S.qc, 1)} − ${fmt(S.s0, 1)} = ${fmt(S.q, 1)} kPa; profundidad de influencia ${fmt(S.zInf, 2)} m (Δσz ≤ ${fmt(I.asK, 2)}·σ'v0); s centro = ${fmt(S.sCen * 1000, 1)} mm; s punto característico = ${fmt(S.sCar * 1000, 1)} mm`,
+          crit: `s ≤ s adm = ${fmt(I.sAdm, 0)} mm`, nt: `Combinación ${cs.id} (P = N + G = ${fmt(cs.N + W.W, 0)} kN). Carga media (sin momentos); no incluye asentamiento inmediato no drenado ni consolidación secundaria.`,
+          sug: 'Aumentar la planta, profundizar la fundación o mejorar el suelo.' });
+        add({ key: 'asprof', g: gA, n: 'Profundidad de influencia cubierta por los estratos', st: S.covered ? 'ok' : 'nv',
+          txt: S.covered ? `Δσz ≤ ${fmt(I.asK, 2)}·σ'v0 a ${fmt(S.zInf, 2)} m (estratos hasta ${fmt(S.Ht, 2)} m)` : `No verificado: los estratos terminan a ${fmt(S.Ht, 2)} m y Δσz todavía supera ${fmt(I.asK, 2)}·σ'v0; el asentamiento puede estar subestimado`,
+          ref: 'Criterio de proyecto (k configurable)', formula: "Δσz(z) ≤ k·σ'v0(z)", subst: '', crit: 'La profundidad de influencia debe quedar dentro de los estratos definidos', sug: 'Agregar estratos más profundos.' });
+        if (I.lVec > 0) {
+          const beta = Math.abs(smm - I.sVec) / (I.lVec * 1000);
+          add({ key: 'asdist', g: gA, n: 'Distorsión angular con la zapata vecina', kind: 'le', d: beta, c: 1 / I.betaLim, unit: '', dec: 5, combo: cs.id,
+            ref: 'Criterio de proyecto (distorsión angular límite, dato)', formula: 'β = |s − s vecina|/l', subst: `|${fmt(smm, 1)} − ${fmt(I.sVec, 1)}| / ${fmt(I.lVec * 1000, 0)}`, crit: `β ≤ 1/${fmt(I.betaLim, 0)}`, sug: 'Igualar asentamientos entre zapatas vecinas.' });
+        }
       }
     }
     if (opts.serviceOnly) return R;
@@ -786,6 +902,6 @@
   return {
     DIAM, ES, abar, kgm, beta1, fmt, defaults, normalize, validate, solvePressure, coords, weights, depths,
     flexAt, asRequired, rhoMin, phiFlex, ldTension, ldHook, ldComp, punching, colSection, colState, colCapacity,
-    columnAuto, supportedBars, tieMinDiam, bendR, colShear, analyze, layout, mkCheck
+    columnAuto, supportedBars, tieMinDiam, bendR, colShear, analyze, layout, mkCheck, newmarkI, stressRect, sigmaV, settlement
   };
 });

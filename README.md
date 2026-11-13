@@ -7,6 +7,7 @@ Se abre con cualquier navegador: `zapata_aislada.html` (necesita la carpeta `js/
 ## Qué hace
 
 - **Suelo y estabilidad (combinaciones de servicio):** tensión máxima y media, área comprimida con despegue biaxial, vuelco, deslizamiento y deslizamiento con torsión Mz.
+- **Asentamientos:** estratos con nivel freático; Δσz por Boussinesq (factores de Newmark); suelos granulares con módulo edométrico y cohesivos por consolidación primaria (Cc, Cr, e0, OCR). Calcula el asentamiento en el centro y en el punto característico (zapata rígida), la profundidad de influencia y, opcionalmente, la distorsión angular con una zapata vecina.
 - **Zapata (combinaciones últimas):**
   - flexión inferior y superior, con cuantías mínima y máxima y separaciones
   - corte unidireccional y punzonado interior, de borde o de esquina, con transferencia de momento
